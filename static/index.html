@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#132b36">
+  <title>向前 · 个人求职工作台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="login-screen" class="login-screen" hidden>
+    <section class="login-card">
+      <div class="brand-symbol">↗</div><p class="eyebrow">YOUR NEXT CHAPTER</p>
+      <h1>向前，每一步都有准备。</h1>
+      <p class="muted">你的岗位、经历与准备材料，保存在专属工作台。</p>
+      <form id="login-form"><label>工作台密码<input type="password" name="password" required autocomplete="current-password" placeholder="输入访问密码"></label><button class="button primary full" type="submit">进入工作台 <span>→</span></button><p id="login-error" class="error-text" role="alert"></p></form>
+      <p class="login-foot">仅供个人使用 · 文件访问受保护</p>
+    </section>
+  </div>
+  <div id="app" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#today"><span class="brand-symbol">↗</span><span>向前<small>个人求职工作台</small></span></a>
+      <div class="sidebar-label">我的工作台</div>
+      <nav id="main-nav" aria-label="主要导航">
+        <a href="#today" data-page="today"><span class="nav-icon">◈</span>今日推荐</a>
+        <a href="#jobs" data-page="jobs"><span class="nav-icon">▦</span>岗位库<span class="nav-count" id="nav-count">0</span></a>
+        <a href="#import" data-page="import"><span class="nav-icon">＋</span>导入岗位</a>
+        <div class="nav-separator"></div>
+        <a href="#profile" data-page="profile"><span class="nav-icon">◎</span>我的资料</a>
+        <a href="#settings" data-page="settings"><span class="nav-icon">⚙</span>设置</a>
+      </nav>
+      <div class="sidebar-bottom"><div class="privacy-mark"><span class="status-dot"></span>私密工作空间</div><p>准备得更充分，<br>走向更适合自己的机会。</p><span class="version-label">PERSONAL WORKSPACE · V1</span></div>
+    </aside>
+    <div class="main-shell"><header class="topbar"><div><span class="topbar-label">WORKSPACE</span><span class="topbar-divider">/</span><span id="breadcrumb">今日推荐</span></div><div class="topbar-right"><span id="today-date"></span><span class="avatar" title="个人工作台">我</span></div></header><main id="main-content" tabindex="-1"><div class="loading">正在打开工作台…</div></main></div>
+  </div>
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

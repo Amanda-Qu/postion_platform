@@ -1,0 +1,28 @@
+{
+  "name": "",
+  "contact": "",
+  "years": 7,
+  "summary": "约7年计算机视觉算法经验，主要项目来自医疗影像。希望真实保留项目背景，突出可迁移的算法研发、训练与部署能力。",
+  "preferred_city": "深圳",
+  "salary_target": 40000,
+  "weekly_hours": 8,
+  "directions": ["多模态/VLM", "数据闭环", "工业视觉", "具身智能", "算法研发", "训练与部署工程"],
+  "preferences": "偏好扁平、英文交流较多、重视技术和自主性的团队。其他城市与远程机会单独比较。出差与驻场需逐岗位确认。",
+  "skills": [
+    {"name":"检测","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"分割","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"分类","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"自监督学习","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"MIL","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"模型训练","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"模型部署","level":"done","evidence":"初始自述，有相关经验；具体项目和深度待核对","confirmed":false},
+    {"name":"多模态微调","level":"done","evidence":"初始自述，有实践；具体项目和能力深度待核对","confirmed":false},
+    {"name":"量化","level":"done","evidence":"初始自述，有实践；具体项目和能力深度待核对","confirmed":false},
+    {"name":"蒸馏","level":"done","evidence":"初始自述，有实践；具体项目和能力深度待核对","confirmed":false},
+    {"name":"边缘部署","level":"done","evidence":"初始自述，有实践；具体项目和能力深度待核对","confirmed":false}
+  ],
+  "projects": [],
+  "education": [],
+  "experience": [],
+  "confirmed": false
+}
