@@ -20,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from bs4 import BeautifulSoup
 
-from . import ai, interview, notifications
+from . import ai, interview, notifications, company_discovery
 from .analysis import match_job, report, tags
 from .exports import ResumeContent, export_resume, resume_blocks
 from .models import Profile, Settings, JobPatch, Language, Login, InterviewStart, Answer
@@ -437,7 +437,7 @@ def create_app(data_dir=None, start_worker=True):
     @app.get('/api/sources/catalog')
     def source_catalog_get():
         return {'version':CATALOG_VERSION, 'sources':company_catalog(),
-                'scope':'已核验公司招聘入口目录；尚未实现基于技能的全网公司搜索'}
+                'scope':'人工维护的入口目录；另可通过「发现新公司」按技能搜索待核实线索'}
 
     @app.post('/api/sources/catalog/merge')
     def source_catalog_merge(body:dict):
@@ -454,6 +454,65 @@ def create_app(data_dir=None, start_worker=True):
             value=Settings.model_validate(current).model_dump()
             db.execute("UPDATE kv SET value=? WHERE key='settings'",(dump(value),))
         return {'added_ids':added,'settings':public_settings()}
+
+    discovery_lock = threading.Lock()
+
+    @app.get('/api/sources/discovery')
+    def company_discovery_preview():
+        return {**company_discovery.preview(store.get('profile')),
+                'last_run':store.get('company_discovery_run')}
+
+    @app.post('/api/sources/discovery')
+    def company_discovery_run(body:dict):
+        plan = company_discovery.preview(store.get('profile'))
+        if set(body) != {'query_token'} or body.get('query_token') != plan['query_token']:
+            raise HTTPException(409,'搜索词已改变，请重新打开预览并确认')
+        if not plan['configured']:
+            raise HTTPException(409,plan['setup'])
+        if not plan['queries']:
+            raise HTTPException(422,'请先保存通用目标方向或已确认实践技能，以及支持的目标城市')
+        if not discovery_lock.acquire(blocking=False):
+            raise HTTPException(409,'公司搜索正在运行，请稍后查看结果')
+        try:
+            last=store.get('company_discovery_run') or {}
+            if time.time() - last.get('started_epoch',0) < 60:
+                raise HTTPException(429,'请等待一分钟再搜索；上次结果已保留')
+            started=time.time()
+            result=company_discovery.discover(plan,store.get('settings')['sources'])
+            result['started_epoch']=started
+            store.set('company_discovery_run',result)
+            return result
+        finally:
+            discovery_lock.release()
+
+    @app.post('/api/sources/discovery/review')
+    def company_discovery_review(body:dict):
+        if set(body) != {'id','company','official_url','confirmed'} or body.get('confirmed') is not True:
+            raise HTTPException(422,'请确认公司名称及官网证据后再添加')
+        company=body.get('company')
+        official=company_discovery.candidate_url(body.get('official_url'))
+        if not isinstance(company,str) or not 1 <= len(company.strip()) <= 100 or not official:
+            raise HTTPException(422,'请提供公司名称和公开 HTTPS 官网证据链接')
+        # User attestation is labelled separately from automated ownership proof.
+        # No arbitrary-site fetch and no automatic parser/enabling from a search hit.
+        with store.connect(immediate=True) as db:
+            row=db.execute("SELECT value FROM kv WHERE key='company_discovery_run'").fetchone()
+            run=json.loads(row[0]) if row else {}
+            candidate=next((c for c in run.get('candidates',[]) if c['id']==body['id']),None)
+            if not candidate: raise HTTPException(404,'线索不存在，请刷新结果')
+            settings=json.loads(db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()[0])
+            if not any(company_discovery.dedupe_key(s.get('url',''))==company_discovery.dedupe_key(candidate['url']) for s in settings['sources']):
+                if len(settings['sources']) >= 30: raise HTTPException(422,'来源最多 30 个')
+                settings['sources'].append(dict(id=candidate['id'],name=company.strip()+' · 人工核对入口',
+                    company=company.strip(),url=candidate['url'],kind='career_portal',enabled=False,
+                    status='人工查看',ingestion_status='portal_pending',verification='user_confirmed',
+                    official_evidence_url=official,reviewed_at=now(),discovery_evidence=candidate.copy(),
+                    message='官网归属由用户核对，系统未独立验证；无自动读取适配器，岗位和薪资未知。'))
+                settings=Settings.model_validate(settings).model_dump()
+                db.execute("UPDATE kv SET value=? WHERE key='settings'",(dump(settings),))
+            candidate.update(review_status='added',verification='user_confirmed',official_evidence_url=official)
+            db.execute("UPDATE kv SET value=? WHERE key='company_discovery_run'",(dump(run),))
+        return {'settings':public_settings(),'last_run':run}
 
     @app.put('/api/settings')
     def settings_put(body:dict):

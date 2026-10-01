@@ -39,3 +39,11 @@ test('untrusted source text and task content stay escaped',()=>{
   assert.doesNotMatch(run(`sourceConfig({name:'<img src=x onerror=evil()>',kind:'career_portal'},0)`),/<img/);
   assert.match(run(`taskResult({tasks:[{kind:'questions',result:{question:'<script>evil()</script>'},status:'completed'}]},'questions','标题','说明')`),/&lt;script&gt;/);
 });
+
+test('company discovery shows setup, exact preview, unknown leads and escapes search data',()=>{
+  const html=ui()(`companyDiscoveryPanel({scope:'线索不是岗位',configured:false,setup:'BRAVE_SEARCH_API_KEY 未配置',queries:['深圳 Python 招聘'],last_run:{at:'2026-10-01',errors:[],candidates:[{id:'one',url:'https://company.example/careers',title:'<script>evil()</script>',snippet:'未核实',query:'深圳 Python 招聘',verification:'unknown',review_status:'pending'}]}})`);
+  assert.match(html,/BRAVE_SEARCH_API_KEY/);assert.match(html,/深圳 Python 招聘/);
+  assert.match(html,/确认关键词并搜索一次/);assert.match(html,/公司官网归属：未知/);
+  assert.match(html,/在招岗位／城市／薪资：未知/);assert.match(html,/&lt;script&gt;/);
+  assert.doesNotMatch(html,/<script>/);assert.match(html,/disabled/);
+});
