@@ -7,7 +7,7 @@ from . import ai, notifications
 from .analysis import report, questions, learning_plan, stories, resume_version, match_job, tags
 from .parsing import salary_group
 from .constraints import classify_constraints, evidence_rank
-from .sources import fetch_source
+from .sources import fetch_source, same_source_config
 from .store import now, uid, dump, job_signature
 
 KINDS=('report','resume','questions','plan','stories')
@@ -146,7 +146,7 @@ class Worker:
             # fetch cannot revert changes the user just made in the settings page.
             latest=self.store.get('settings')
             for current in latest.get('sources',[]):
-                if current['id']==source['id'] and all(current.get(k)==source.get(k) for k in ('kind','board','url','site','region','company')):
+                if current['id']==source['id'] and same_source_config(current,source):
                     for k in ('status','message','last_fetched','last_attempt'):
                         if k in source: current[k]=source[k]
             self.store.set('settings',latest)

@@ -25,7 +25,7 @@ from .analysis import match_job, report, tags
 from .exports import ResumeContent, export_resume, resume_blocks
 from .models import Profile, Settings, JobPatch, Language, Login, InterviewStart, Answer
 from .parsing import extract_file, merge_texts, parse_job, salary_group
-from .sources import source_catalog, safe_fetch
+from .sources import source_catalog, safe_fetch, same_source_config
 from .profile_merge import merge_profile
 from .constraints import classify_constraints, evidence_rank
 from .source_catalog import company_catalog, merge_catalog, CATALOG_VERSION
@@ -522,7 +522,7 @@ def create_app(data_dir=None, start_worker=True):
         old={x['id']:x for x in current['sources']}
         for source in value['sources']:
             prior=old.get(source['id'])
-            if prior and all(source.get(k)==prior.get(k) for k in ('kind','board','url','site','region','company')):
+            if prior and same_source_config(source,prior):
                 for k in ('status','message','last_fetched','last_attempt'):
                     if k in prior: source[k]=prior[k]
             else:

@@ -458,6 +458,17 @@ def parse_public_page(page: FetchResult, source_name: str = "公司招聘官网"
     return results
 
 
+def same_source_config(left: dict, right: dict) -> bool:
+    """Compare connection inputs, treating absent optional values as empty.
+
+    Model validation adds empty defaults to older source rows. Those defaults
+    must not invalidate their connection evidence or an in-flight fetch result.
+    Include the legacy slug fallback used by both public API adapters.
+    """
+    return all((left.get(key) or "") == (right.get(key) or "")
+               for key in ("kind", "board", "url", "site", "region", "company", "slug"))
+
+
 def fetch_source(config: dict) -> list[dict]:
     """Normalize one configured source. Errors propagate for persisted run status."""
     kind = config.get("kind", "")
