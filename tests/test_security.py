@@ -81,7 +81,8 @@ def test_summary_aspiration_does_not_promote_learned_skill_to_practice(tmp_path)
     profile.update(confirmed=True, summary="希望向多模态方向发展，尚未做过相关项目。", skills=[{"name": "多模态微调", "level": "learned", "evidence": "仅学习教程，未做生产项目", "confirmed": True}], projects=[])
     job = job_input(id="job", title="VLM工程师", requirements="多模态模型", responsibilities="研发多模态模型", salary_raw="40–60K")
     result = analysis.match_job(job, profile)
-    dimension = next(d for d in result["dimensions"] if d["requirement"] == "多模态微调")
+    dimension = next(d for d in result["dimensions"] if d["requirement"] == "多模态")
+    assert not any(d["requirement"] == "多模态微调" for d in result["dimensions"])
     assert dimension["match"] != "有已确认实践证据"
     assert dimension["score"] != 100
     assert result["recommendation"] != "优先投递"

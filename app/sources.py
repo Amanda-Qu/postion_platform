@@ -463,6 +463,11 @@ def fetch_source(config: dict) -> list[dict]:
     kind = config.get("kind", "")
     if kind in ("boss", "liepin", "linkedin"):
         raise SourceError("该平台暂未接入获授权的职位读取接口；支持手动导入截图、文字和文件")
+    if kind == "career_portal":
+        raise SourceError("仅核验了公司招聘入口，尚无自动读取适配器；请人工查看并导入岗位")
+    if kind in ("tokenfab", "extremevision"):
+        from .career_pages import fetch_career_page
+        return fetch_career_page(config)
     if kind == "public_page":
         return parse_public_page(safe_fetch(config.get("url", ""), max_bytes=5 * 1024 * 1024), config.get("name") or "公司招聘官网")
     if kind == "greenhouse":

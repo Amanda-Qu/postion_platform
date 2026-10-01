@@ -69,7 +69,8 @@ AI配置后，在设置中打开「AI增强」。调用的是服务端 OpenAI-co
 
 完整官方依据和2026-09-27实际获取结果见 [docs/SOURCES.md](docs/SOURCES.md)。
 
-- 已实现并实测：Greenhouse公开职位API、Lever公开 postings API、公开网页JSON-LD JobPosting。
+- 已实现：Greenhouse公开职位API、Lever公开 postings API、公开网页JSON-LD JobPosting，以及 TokenFab / 极视角静态官网解析。后两者已用真实公开 HTML 验证解析，完整安全网络获取仍待运行环境验证。
+- 设置中可选择 11 家已核验公司招聘入口，按 id 追加、保留已有配置，新增默认不启用。其中 2 家有静态解析器，另 9 家仅人工查看/导入；这不是基于技能的全网公司发现。
 - 默认启用 Figure 公开招聘接口，属于海外具身/机器人机会。按岗位名称和画像匹配过滤，不能因为公司做机器人就推荐其电气、线束、财务或安保职位。可配置其他公司；深圳覆盖仍需扩展公司名单或手动导入。
 - BOSS直聘、猎聘、LinkedIn：当前没有获授权的自动职位读取连接器，页面明确「暂不支持」。可组合导入截图、文字和文件。没有绕过登录、验证码或robots限制。
 - 未知发布时间明确标注；首次发现和最近核验独立。访问失败记录失败原因，不能因此关闭岗位。仅公开有效性信息或用户明确确认用于关闭。
@@ -105,6 +106,7 @@ AI配置后，在设置中打开「AI增强」。调用的是服务端 OpenAI-co
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
 node --check static/app.js
+node --test tests/test_ui_render.cjs
 ```
 
 所有验收样例使用独立临时库，真实界面不预置虚构岗位。浏览器验收服务器为 `scripts/ui_test_server.py`，专用端口8766、`tmp/ui-acceptance/` 数据目录、明确测试密码；不要把测试服务器开放到公网。
