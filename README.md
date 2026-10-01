@@ -109,6 +109,10 @@ node --check static/app.js
 node --test tests/test_ui_render.cjs
 ```
 
+GitHub Actions 的 `Tests` 工作流在拉取请求和 `main`/`master` 分支推送时运行以上检查（Ubuntu、Python 3.12、Node.js 24），按 `requirements.lock` 安装依赖。工作流仅有仓库内容读取权限，不使用应用密钥，不启动真实招聘抓取、AI、邮件发送或部署任务。
+
+Linux CI 会明确列出跳过的 Windows OCR 集成测试；通过 CI 不代表 Windows OCR 已验证，仍需在有相应语言组件的 Windows 机器验收。工作流文件加入仓库也不代表托管 CI 已运行，结果以对应提交的 GitHub Actions 记录为准。
+
 所有验收样例使用独立临时库，真实界面不预置虚构岗位。浏览器验收服务器为 `scripts/ui_test_server.py`，专用端口8766、`tmp/ui-acceptance/` 数据目录、明确测试密码；不要把测试服务器开放到公网。
 
 验收记录、已验证能力及仍依赖外部配置的项目见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。
