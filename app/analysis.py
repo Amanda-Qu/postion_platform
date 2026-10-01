@@ -12,14 +12,16 @@ TAXONOMY = {
  '检测': ['检测','目标检测','object detection','yolo'],
  '分割': ['分割','segmentation'],
  '分类': ['分类','classification'],
- '自监督学习': ['自监督','self-supervised','self supervised'],
+ '自监督学习': ['自监督','self-supervised','self supervised','masked autoencoder','masked auto-encoder','掩码自编码'],
  'MIL': ['mil','multiple instance','多实例'],
  '模型训练': ['模型训练','训练工程','model training','distributed training','分布式训练'],
  '模型部署': ['模型部署','deployment','inference','推理优化'],
- '多模态微调': ['多模态','multimodal','multi-modal','vlm','vision language','vision-language'],
+ '多模态': ['多模态','multimodal','multi-modal','vlm','vision language','vision-language','qwen-vl'],
+ '模型微调': ['微调','fine-tuning','fine tuning','finetuning','lora','qlora','peft'],
+ '多模态微调': ['多模态微调','vlm fine-tuning','vlm fine tuning'],
  '量化': ['量化','quantization','int8','int4'],
  '蒸馏': ['蒸馏','distillation'],
- '边缘部署': ['边缘','edge','tensorrt','onnx'],
+ '边缘部署': ['边缘','edge','tensorrt','onnx','jetson','rknn'],
  '具身智能': ['具身','embodied','robotics','robot learning','机器人'],
  '强化学习': ['强化学习','reinforcement learning','rlhf'],
  '数据闭环': ['数据闭环','data engine','data curation','active learning','主动学习'],
@@ -36,13 +38,26 @@ def contains(text, term):
     return term.lower() in text.lower()
 
 def tags(text):
-    return [name for name, terms in TAXONOMY.items() if any(contains(text, t) for t in terms)]
+    found = {name for name, terms in TAXONOMY.items() if any(contains(text, t) for t in terms)}
+    # Model names identify a topic, never a proficiency level. Qwen alone can be
+    # language-only; MAE alone can mean mean absolute error, not pretraining.
+    if re.search(r'(?<![a-z])qwen[\d. -]*-?vl(?![a-z])', text, re.I):
+        found.add('多模态')
+    if re.search(r'(?<![a-z])mae(?![a-z]).{0,24}(?:预训练|自监督|masked|pretrain)|(?:预训练|自监督|masked|pretrain).{0,24}(?<![a-z])mae(?![a-z])', text, re.I):
+        found.add('自监督学习')
+    # VLM usage/data annotation is not fine-tuning. Require both topics in the
+    # same clause; independent requirements elsewhere in a JD cannot establish it.
+    for clause in re.split(r'[\n。；;]+', text):
+        multimodal = any(contains(clause, t) for t in TAXONOMY['多模态']) or bool(re.search(r'(?<![a-z])qwen[\d. -]*-?vl(?![a-z])', clause, re.I))
+        if multimodal and any(contains(clause, t) for t in TAXONOMY['模型微调']):
+            found.add('多模态微调')
+    return [name for name in TAXONOMY if name in found]
 
 def sentences(text):
     return [x.strip(' •-\t') for x in re.split(r'[\n。；;]+', text) if x.strip()]
 
 def quote_for(text, tag):
-    return next((s for s in sentences(text) if any(contains(s, t) for t in TAXONOMY.get(tag, [tag]))), '')
+    return next((s for s in sentences(text) if tag in tags(s)), '')
 
 def requirement_priority(text, quote):
     optional=False
@@ -110,7 +125,8 @@ def match_job(job, profile):
         recommendation = '优先投递'
     else:
         recommendation = '值得沟通'
-    return {'engine':'本地证据规则 v1', 'created_at':now(), 'job_id':job['id'], 'nature':explicit_roles or [{'category':'待核实','job_quote':'','interpretation':'职责信息不足，无法判断日常工作比例'}], 'dimensions':dimensions, 'project_match':[{'ref':'project:'+p['id'],'title':p['title'],'shared_skills':list(set(tags(dump(p)))&set(required)),'note':'保留原始行业背景，强调方法、验证与可迁移能力'} for p in projects[:3]], 'level':level, 'direction':{'desired':profile.get('directions',[]),'job_tags':required,'note':'主题相近不代表岗位职责相同，需核对实际研发与交付占比'}, 'constraints':constraints, 'recommendation':recommendation, 'score':round(sum(known_scores)/len(known_scores)) if known_scores else None, 'score_explanation':f'仅对有已确认实践或已记录学习证据的 {len(known_scores)}/{len(dimensions)} 项取均值；未知不计零分。这是证据覆盖指标，不是录用概率。', 'information_completeness':completeness, 'unconfirmed':['岗位发布时间未知'] if not job.get('published_at') else [], 'attention':questions(job, profile, dimensions), 'missing_profile':['补充并确认具体项目、个人贡献、验证方式和指标'] if not projects else []}
+    coverage = {'confirmed':sum(d['match']=='有已确认实践证据' for d in dimensions), 'total':len(dimensions), 'unknown':sum(d['match']=='信息不足' for d in dimensions), 'learned':sum(d['match']=='仅学习过，缺实践证据' for d in dimensions), 'unconfirmed':sum(d['match']=='自述实践，深度待核对' for d in dimensions)}
+    return {'evidence_coverage':coverage, 'engine':'本地证据规则 v1', 'created_at':now(), 'job_id':job['id'], 'nature':explicit_roles or [{'category':'待核实','job_quote':'','interpretation':'职责信息不足，无法判断日常工作比例'}], 'dimensions':dimensions, 'project_match':[{'ref':'project:'+p['id'],'title':p['title'],'shared_skills':list(set(tags(dump(p)))&set(required)),'note':'保留原始行业背景，强调方法、验证与可迁移能力'} for p in projects[:3]], 'level':level, 'direction':{'desired':profile.get('directions',[]),'job_tags':required,'note':'主题相近不代表岗位职责相同，需核对实际研发与交付占比'}, 'constraints':constraints, 'recommendation':recommendation, 'score':round(sum(known_scores)/len(known_scores)) if known_scores else None, 'score_explanation':f'仅对有已确认实践或已记录学习证据的 {len(known_scores)}/{len(dimensions)} 项取均值；未知不计零分。这是已知条目的均值，不代表整体覆盖；请同时看已确认项/总项数。未知不代表不具备能力，也不是录用概率。', 'information_completeness':completeness, 'unconfirmed':['岗位发布时间未知'] if not job.get('published_at') else [], 'attention':questions(job, profile, dimensions), 'missing_profile':['补充并确认具体项目、个人贡献、验证方式和指标'] if not projects else []}
 
 def questions(job, profile, dimensions=None):
     salary = job.get('salary_raw','') or '未披露'
@@ -125,7 +141,7 @@ def questions(job, profile, dimensions=None):
 
 def report(job, profile, settings):
     result = match_job(job, profile)
-    result['strengths'] = [d for d in result['dimensions'] if d['evidence']]
+    result['strengths'] = [d for d in result['dimensions'] if d['match']=='有已确认实践证据']
     result['gaps'] = [d for d in result['dimensions'] if d['match'] != '有已确认实践证据']
     result['emphasis'] = result['project_match']
     if settings.get('use_ai'):
@@ -141,7 +157,28 @@ def report(job, profile, settings):
                 raise ValueError('AI 事实结论缺少来源，结果已拒绝保存')
             if claim['kind']=='明确事实' and any(not bank[ref]['confirmed'] for ref in claim['evidence_refs']):
                 raise ValueError('AI 把尚未确认的个人经历作为明确事实，结果已拒绝保存')
-        result.update(ai_analysis=output, engine='本地证据规则 + AI（已校验引用）')
+            if claim['kind']=='明确事实':
+                # Reference existence is not entailment. Only verbatim extracts
+                # can be called facts automatically. Paraphrases or new personal
+                # assertions stay review-required even with a valid JD citation.
+                conclusion = claim['conclusion'].strip()
+                sources = []
+                for ref in claim['evidence_refs']:
+                    if not bank[ref]['confirmed']:
+                        continue
+                    evidence = bank[ref]['text'].strip()
+                    sources.extend([evidence, *sentences(evidence)])
+                    if ref.startswith('skill:') and '：' in evidence:
+                        detail = evidence.split('：', 1)[1].strip()
+                        sources.extend([detail, *sentences(detail)])
+                # A job quote cannot verify a candidate claim. JD-only extracts
+                # remain visible as job_quote, but their generated conclusions
+                # need review; a model can put candidate assertions in any field.
+                if not conclusion or conclusion not in sources:
+                    claim.update(kind='待核实', requires_review=True, review_reason='引用存在不代表结论由引用支持；此改写或判断须逐项核对，不能作为个人履历事实。')
+        output['summary_requires_review'] = True
+        output['review_note'] = 'AI概要和非原文判断均待核对；仅核验引用存在，不自动认证候选人能力或新增经历。'
+        result.update(ai_analysis=output, engine='本地证据规则 + AI（引用已检查，判断待核对）')
     else:
         result['ai_status'] = 'AI增强未启用' if ai.configured(settings) else 'AI增强待配置；当前结果为本地证据整理'
     return result

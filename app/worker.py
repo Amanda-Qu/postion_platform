@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 from . import ai, notifications
 from .analysis import report, questions, learning_plan, stories, resume_version, match_job, tags
 from .parsing import salary_group
-from .sources import fetch_source
+from .constraints import classify_constraints, evidence_rank
+from .sources import fetch_source, same_source_config
 from .store import now, uid, dump, job_signature
 
 KINDS=('report','resume','questions','plan','stories')
@@ -127,7 +128,7 @@ class Worker:
                 relevant=[j for j in fetched if self.relevant(j,profile)]
                 new_count=0; merged=0
                 for job in relevant:
-                    job['sources']=[{'url':job.pop('source_url',''),'name':job.pop('source_name',source['name']),'fetched_at':now()}]
+                    job['sources']=[{'url':job.pop('source_url',''),'name':job.pop('source_name',source['name']),'fetched_at':now(), 'source_identity':job.pop('source_identity','')}]
                     job['last_verified']=now()
                     job['ingest_mode']='source_refresh'
                     job['salary_detail']=salary_group(job.get('salary_raw',''),profile['salary_target'])
@@ -145,7 +146,7 @@ class Worker:
             # fetch cannot revert changes the user just made in the settings page.
             latest=self.store.get('settings')
             for current in latest.get('sources',[]):
-                if current['id']==source['id'] and all(current.get(k)==source.get(k) for k in ('kind','board','url','site','region','company')):
+                if current['id']==source['id'] and same_source_config(current,source):
                     for k in ('status','message','last_fetched','last_attempt'):
                         if k in source: current[k]=source[k]
             self.store.set('settings',latest)
@@ -161,7 +162,7 @@ class Worker:
         settings=self.store.get('settings'); profile=self.store.get('profile')
         jobs=[j for j in self.store.all('jobs') if not j.get('is_sample') and j.get('status_validity')!='已关闭' and j.get('status') not in ('不合适','已关闭','已投递','面试中','Offer')]
         jobs=[j for j in jobs if self.relevant(j,profile) and salary_group(j.get('salary_raw',''),profile['salary_target'])['group']!='低于目标']
-        jobs.sort(key=lambda j:(profile['preferred_city'] in j.get('city',''), j.get('salary_group')=='明确符合', (j.get('analysis') or {}).get('score') or 0),reverse=True)
+        jobs.sort(key=lambda j:({'meets':4,'possible':3,'unknown':2,'other_city':1,'below':0}[classify_constraints(j,profile)['code']], evidence_rank(j)),reverse=True)
         digest={'id':uid(),'date':datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat(),'created_at':now(),'run_id':run['id'],'job_ids':[],'email_status':'disabled','email_error':''}
         # The notification ledger and in-app digest commit atomically. Repeated
         # fetches, multi-source merges, restarts and manual reruns cannot re-push a job.
@@ -172,7 +173,7 @@ class Worker:
                 if not existing:
                     db.execute('INSERT INTO delivered VALUES (?,?)',(job['id'],digest['id']))
                     digest['job_ids'].append(job['id'])
-            digest['summary']=f"首次推荐 {len(digest['job_ids'])} 个岗位。发现日期不等于发布日期。" if digest['job_ids'] else '本次没有未推荐过且符合筛选条件的岗位，不凑数量。'
+            digest['summary']=f"首次整理 {len(digest['job_ids'])} 个相关岗位，含待核实及其他城市线索，不代表均满足约束。发现日期不等于发布日期。" if digest['job_ids'] else '本次没有未推荐过且符合筛选条件的岗位，不凑数量。'
             db.execute('INSERT INTO digests VALUES (?,?)',(digest['id'],dump(digest)))
         if settings.get('email_enabled') and digest['job_ids']:
             if not notifications.configured():

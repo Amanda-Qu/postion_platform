@@ -20,12 +20,15 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from bs4 import BeautifulSoup
 
-from . import ai, interview, notifications
+from . import ai, interview, notifications, company_discovery
 from .analysis import match_job, report, tags
 from .exports import ResumeContent, export_resume, resume_blocks
 from .models import Profile, Settings, JobPatch, Language, Login, InterviewStart, Answer
 from .parsing import extract_file, merge_texts, parse_job, salary_group
-from .sources import source_catalog, safe_fetch
+from .sources import source_catalog, safe_fetch, same_source_config
+from .profile_merge import merge_profile
+from .constraints import classify_constraints, evidence_rank
+from .source_catalog import company_catalog, merge_catalog, CATALOG_VERSION
 from .store import ROOT, Store, now, uid, canonical_url, dump, job_signature
 from .worker import Worker, KINDS
 
@@ -113,6 +116,7 @@ def create_app(data_dir=None, start_worker=True):
         profile=store.get('profile')
         job['salary_detail']=salary_group(job.get('salary_raw',''),profile['salary_target'])
         job['salary_group']=job['salary_detail']['group']
+        job['constraint_fit']=classify_constraints(job,profile)
         return job
 
     def decorate(job):
@@ -120,7 +124,10 @@ def create_app(data_dir=None, start_worker=True):
         profile=store.get('profile')
         job['salary_detail']=salary_group(job.get('salary_raw',''),profile['salary_target'])
         job['salary_group']=job['salary_detail']['group']
+        job['constraint_fit']=classify_constraints(job,profile)
         if not job.get('analysis'): job['analysis']=match_job(job,profile)
+        if 'evidence_coverage' not in job['analysis']:
+            job['analysis']['evidence_coverage']=match_job(job,profile)['evidence_coverage']
         job['recommendation']=job['analysis']['recommendation']
         job['match_score']=job['analysis'].get('score')
         themes=', '.join(job['analysis'].get('direction',{}).get('job_tags',[])[:4]) or '职责尚待补充'
@@ -171,7 +178,7 @@ def create_app(data_dir=None, start_worker=True):
         stats={'total':len(jobs),'new_today':sum(first_today(j) for j in jobs),'ready':counts['可投'],'applied':counts['已投递'],'interviewing':counts['面试中'],'confirmed_salary':sum(j['salary_group']=='明确符合' for j in jobs),'statuses':counts}
         profile=store.get('profile')
         recommendations=[j for j in jobs if not j.get('is_sample') and worker.relevant(j,profile) and j['status_validity']!='已关闭' and j['status'] not in ('不合适','已关闭','已投递','面试中','Offer') and j['salary_group']!='低于目标']
-        recommendations.sort(key=lambda j:(profile['preferred_city'] in j.get('city',''), j['salary_group']=='明确符合', j.get('published_at') or '', j['match_score'] or -1),reverse=True)
+        recommendations.sort(key=lambda j:({'meets':4,'possible':3,'unknown':2,'other_city':1,'below':0}[j['constraint_fit']['code']], evidence_rank(j), j.get('published_at') or ''),reverse=True)
         return {'jobs':jobs,'recommendations':recommendations,'stats':stats,'sources':public_settings()['sources'],'runs':store.all('runs')[:15],'digests':store.all('digests')[:30],'settings':public_settings(),'profile':profile}
 
     @app.get('/api/jobs')
@@ -182,7 +189,7 @@ def create_app(data_dir=None, start_worker=True):
         if salary_group: rows=[j for j in rows if j['salary_group']==salary_group]
         if city: rows=[j for j in rows if city.lower() in j.get('city','').lower()]
         if favorite in ('true','1'): rows=[j for j in rows if j.get('favorite')]
-        if sort in ('score','match'): rows.sort(key=lambda j:j['match_score'] or -1,reverse=True)
+        if sort in ('score','match'): rows.sort(key=evidence_rank,reverse=True)
         elif sort=='salary': rows.sort(key=lambda j:j['salary_detail']['min_monthly'] or -1,reverse=True)
         elif sort=='updated': rows.sort(key=lambda j:j['updated_at'],reverse=True)
         return {'jobs':rows}
@@ -193,10 +200,12 @@ def create_app(data_dir=None, start_worker=True):
         resumes=[r for r in store.all('resumes') if r['job_id']==id]
         for r in resumes:
             r['blocks']=resume_blocks(r['content'])
+            r['stale']=r.get('profile_snapshot')!=store.get('profile') or job_signature(r.get('job_snapshot') or {})!=job_signature(job)
+            if r['stale']: r['stale_reason']='此版本基于较早的画像或岗位资料；新版本不会改写历史版本。'
             r.pop('profile_snapshot',None); r.pop('job_snapshot',None)
         tasks=store.tasks_for(id)
         for task in tasks:
-            task['stale']=task['status']=='completed' and (task.get('profile_version')!=store.get('profile_version',0) or task.get('job_signature')!=job_signature(job))
+            task['stale']=bool(task.get('result')) and (task.get('profile_version')!=store.get('profile_version',0) or task.get('job_signature')!=job_signature(job))
             if task['stale']: task['stale_reason']='画像或岗位已修改，当前保存结果基于旧资料；可单项更新。'
         return {'job':job,'tasks':tasks,'resumes':resumes,'interviews':[{k:v for k,v in x.items() if k not in ('profile_snapshot','job_snapshot','resume_snapshot')} for x in store.all('interviews') if x['job_id']==id], 'analysis':job.get('analysis')}
 
@@ -353,22 +362,50 @@ def create_app(data_dir=None, start_worker=True):
 
     @app.get('/api/profile')
     def profile():
-        return {'profile':store.get('profile'),'uploads':[x for x in store.all('files') if x['purpose']=='profile'],'draft':store.get('profile_draft')}
+        return {'profile':store.get('profile'),'version':store.get('profile_version',0),'uploads':[x for x in store.all('files') if x['purpose']=='profile'],'draft':store.get('profile_draft')}
+
+    def profile_changed(value):
+        store.put('audit',{'id':uid(),'at':now(),'kind':'profile_update','snapshot':value})
+        for job in store.all('jobs'):
+            store.update_job(job['id'],lambda current:current.update(analysis=None,materials_note='个人画像已更新，历史材料保留原版本。请核对准备进度中的待更新项。'))
+
+    def write_profile(db,value):
+        row=db.execute("SELECT value FROM kv WHERE key='profile_version'").fetchone()
+        version=json.loads(row[0]) if row else 0
+        for key, val in [('profile',value),('profile_version',version+1)]:
+            db.execute('INSERT INTO kv VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,dump(val)))
 
     @app.put('/api/profile')
     def update_profile(body:Profile):
         value=body.model_dump()
-        store.set('profile',value); store.set('profile_version',store.get('profile_version',0)+1)
-        store.put('audit',{'id':uid(),'at':now(),'kind':'profile_update','snapshot':value})
-        for job in store.all('jobs'):
-            store.update_job(job['id'],lambda current:current.update(analysis=None,materials_note='个人画像已更新，历史材料保留原版本。请核对准备进度中的待更新项。'))
+        with store.connect(immediate=True) as db:
+            write_profile(db,value)
+        profile_changed(value)
+        return {'profile':value}
+
+    @app.post('/api/profile/draft/accept')
+    def accept_profile_draft(body:dict):
+        reviewed=Profile.model_validate(body.get('profile')).model_dump()
+        with store.connect(immediate=True) as db:
+            row=db.execute("SELECT value FROM kv WHERE key='profile_draft'").fetchone()
+            draft=json.loads(row[0]) if row else None
+            if not draft or not draft.get('id') or body.get('draft_id')!=draft['id']:
+                raise HTTPException(409,'草稿已过期或被替换，请重新打开最新提取草稿')
+            current=json.loads(db.execute("SELECT value FROM kv WHERE key='profile'").fetchone()[0])
+            value, conflicts=merge_profile(draft['base_profile'],current,reviewed)
+            if conflicts:
+                raise HTTPException(409,'这些字段在提取后已有更新，未覆盖任何内容。请重新上传并核对：'+ '、'.join(conflicts))
+            value=Profile.model_validate(value).model_dump()
+            write_profile(db,value)
+            db.execute("DELETE FROM kv WHERE key='profile_draft'")
+        profile_changed(value)
         return {'profile':value}
 
     @app.post('/api/profile/upload')
     async def upload_profile(file:UploadFile=File(...)):
         item,path=await save_upload(file,'profile')
         parsed=await run_in_threadpool(extract_file,path)
-        text=parsed['text']; draft=copy.deepcopy(store.get('profile'))
+        text=parsed['text']; base_profile=copy.deepcopy(store.get('profile')); draft=copy.deepcopy(base_profile)
         draft['confirmed']=False
         email=re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',text)
         phone=re.search(r'(?<!\d)1[3-9]\d{9}(?!\d)',text)
@@ -390,12 +427,92 @@ def create_app(data_dir=None, start_worker=True):
             lines=[x.strip() for x in chunk.splitlines() if x.strip()]
             if lines:
                 draft['projects'].append({'id':uid()[:12],'title':lines[0][:150],'context':'','bullets':lines[1:16],'skills':tags(chunk),'confirmed':False})
-        result={'draft':Profile.model_validate(draft).model_dump(),'text':text,'warnings':parsed['warnings']+['提取结果为待核对草稿，未覆盖基础履历。请核对姓名、项目边界、技能深度与学习/实践分类后保存。'],'file':item,'method':parsed['method']}
+        result={'id':uid(),'base_profile':base_profile,'base_version':store.get('profile_version',0),'draft':Profile.model_validate(draft).model_dump(),'text':text,'warnings':parsed['warnings']+['提取结果为待核对草稿，未覆盖基础履历。请核对姓名、项目边界、技能深度与学习/实践分类后保存。'],'file':item,'method':parsed['method']}
         store.set('profile_draft',result)
         return result
 
     @app.get('/api/settings')
     def settings_get(): return public_settings()
+
+    @app.get('/api/sources/catalog')
+    def source_catalog_get():
+        return {'version':CATALOG_VERSION, 'sources':company_catalog(),
+                'scope':'人工维护的入口目录；另可通过「发现新公司」按技能搜索待核实线索'}
+
+    @app.post('/api/sources/catalog/merge')
+    def source_catalog_merge(body:dict):
+        ids=body.get('ids')
+        if set(body) != {'ids'} or not isinstance(ids,list) or not all(isinstance(x,str) for x in ids):
+            raise HTTPException(422,'请提供来源 id 列表')
+        # One write transaction avoids overwriting a simultaneous settings change.
+        with store.connect(immediate=True) as db:
+            current=json.loads(db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()[0])
+            try:
+                current['sources'],added=merge_catalog(current.get('sources',[]),ids)
+            except ValueError as exc:
+                raise HTTPException(422,str(exc)) from exc
+            value=Settings.model_validate(current).model_dump()
+            db.execute("UPDATE kv SET value=? WHERE key='settings'",(dump(value),))
+        return {'added_ids':added,'settings':public_settings()}
+
+    discovery_lock = threading.Lock()
+
+    @app.get('/api/sources/discovery')
+    def company_discovery_preview():
+        return {**company_discovery.preview(store.get('profile')),
+                'last_run':store.get('company_discovery_run')}
+
+    @app.post('/api/sources/discovery')
+    def company_discovery_run(body:dict):
+        plan = company_discovery.preview(store.get('profile'))
+        if set(body) != {'query_token'} or body.get('query_token') != plan['query_token']:
+            raise HTTPException(409,'搜索词已改变，请重新打开预览并确认')
+        if not plan['configured']:
+            raise HTTPException(409,plan['setup'])
+        if not plan['queries']:
+            raise HTTPException(422,'请先保存通用目标方向或已确认实践技能，以及支持的目标城市')
+        if not discovery_lock.acquire(blocking=False):
+            raise HTTPException(409,'公司搜索正在运行，请稍后查看结果')
+        try:
+            last=store.get('company_discovery_run') or {}
+            if time.time() - last.get('started_epoch',0) < 60:
+                raise HTTPException(429,'请等待一分钟再搜索；上次结果已保留')
+            started=time.time()
+            result=company_discovery.discover(plan,store.get('settings')['sources'])
+            result['started_epoch']=started
+            store.set('company_discovery_run',result)
+            return result
+        finally:
+            discovery_lock.release()
+
+    @app.post('/api/sources/discovery/review')
+    def company_discovery_review(body:dict):
+        if set(body) != {'id','company','official_url','confirmed'} or body.get('confirmed') is not True:
+            raise HTTPException(422,'请确认公司名称及官网证据后再添加')
+        company=body.get('company')
+        official=company_discovery.candidate_url(body.get('official_url'))
+        if not isinstance(company,str) or not 1 <= len(company.strip()) <= 100 or not official:
+            raise HTTPException(422,'请提供公司名称和公开 HTTPS 官网证据链接')
+        # User attestation is labelled separately from automated ownership proof.
+        # No arbitrary-site fetch and no automatic parser/enabling from a search hit.
+        with store.connect(immediate=True) as db:
+            row=db.execute("SELECT value FROM kv WHERE key='company_discovery_run'").fetchone()
+            run=json.loads(row[0]) if row else {}
+            candidate=next((c for c in run.get('candidates',[]) if c['id']==body['id']),None)
+            if not candidate: raise HTTPException(404,'线索不存在，请刷新结果')
+            settings=json.loads(db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()[0])
+            if not any(company_discovery.dedupe_key(s.get('url',''))==company_discovery.dedupe_key(candidate['url']) for s in settings['sources']):
+                if len(settings['sources']) >= 30: raise HTTPException(422,'来源最多 30 个')
+                settings['sources'].append(dict(id=candidate['id'],name=company.strip()+' · 人工核对入口',
+                    company=company.strip(),url=candidate['url'],kind='career_portal',enabled=False,
+                    status='人工查看',ingestion_status='portal_pending',verification='user_confirmed',
+                    official_evidence_url=official,reviewed_at=now(),discovery_evidence=candidate.copy(),
+                    message='官网归属由用户核对，系统未独立验证；无自动读取适配器，岗位和薪资未知。'))
+                settings=Settings.model_validate(settings).model_dump()
+                db.execute("UPDATE kv SET value=? WHERE key='settings'",(dump(settings),))
+            candidate.update(review_status='added',verification='user_confirmed',official_evidence_url=official)
+            db.execute("UPDATE kv SET value=? WHERE key='company_discovery_run'",(dump(run),))
+        return {'settings':public_settings(),'last_run':run}
 
     @app.put('/api/settings')
     def settings_put(body:dict):
@@ -405,7 +522,7 @@ def create_app(data_dir=None, start_worker=True):
         old={x['id']:x for x in current['sources']}
         for source in value['sources']:
             prior=old.get(source['id'])
-            if prior and all(source.get(k)==prior.get(k) for k in ('kind','board','url','site','region','company')):
+            if prior and same_source_config(source,prior):
                 for k in ('status','message','last_fetched','last_attempt'):
                     if k in prior: source[k]=prior[k]
             else:

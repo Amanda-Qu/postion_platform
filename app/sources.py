@@ -458,11 +458,27 @@ def parse_public_page(page: FetchResult, source_name: str = "公司招聘官网"
     return results
 
 
+def same_source_config(left: dict, right: dict) -> bool:
+    """Compare connection inputs, treating absent optional values as empty.
+
+    Model validation adds empty defaults to older source rows. Those defaults
+    must not invalidate their connection evidence or an in-flight fetch result.
+    Include the legacy slug fallback used by both public API adapters.
+    """
+    return all((left.get(key) or "") == (right.get(key) or "")
+               for key in ("kind", "board", "url", "site", "region", "company", "slug"))
+
+
 def fetch_source(config: dict) -> list[dict]:
     """Normalize one configured source. Errors propagate for persisted run status."""
     kind = config.get("kind", "")
     if kind in ("boss", "liepin", "linkedin"):
         raise SourceError("该平台暂未接入获授权的职位读取接口；支持手动导入截图、文字和文件")
+    if kind == "career_portal":
+        raise SourceError("仅核验了公司招聘入口，尚无自动读取适配器；请人工查看并导入岗位")
+    if kind in ("tokenfab", "extremevision"):
+        from .career_pages import fetch_career_page
+        return fetch_career_page(config)
     if kind == "public_page":
         return parse_public_page(safe_fetch(config.get("url", ""), max_bytes=5 * 1024 * 1024), config.get("name") or "公司招聘官网")
     if kind == "greenhouse":

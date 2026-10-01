@@ -32,6 +32,18 @@ def canonical_url(url):
     except ValueError:
         return ''
 
+def source_key(source):
+    """A listing-page role needs an identity independent of its shared URL.
+
+    Ordinary detail URLs retain their old keys. Page URLs stay real clickable
+    links; the internal key is namespaced and never used as a request URL.
+    """
+    url = canonical_url(source.get('url', ''))
+    role = source.get('source_identity')
+    if url and isinstance(role,str) and role:
+        return 'role:'+hashlib.sha256((url+'\n'+role).encode()).hexdigest()
+    return url
+
 def normalize(value):
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC',str(value)).casefold())
 
@@ -169,7 +181,7 @@ class Store:
                 url = canonical_url(source.get('url', ''))
                 if url:
                     source['url'] = url
-                    found = db.execute('SELECT j.data FROM jobs j JOIN sources s ON s.job_id=j.id WHERE s.url=?', (sample_prefix+url,)).fetchone()
+                    found = db.execute('SELECT j.data FROM jobs j JOIN sources s ON s.job_id=j.id WHERE s.url=?', (sample_prefix+source_key(source),)).fetchone()
                     if found:
                         break
             if not found and key:
@@ -181,8 +193,8 @@ class Store:
                 existing = json.loads(found[0])
                 # Never overwrite a human correction or workflow status on refresh.
                 conflicts = existing.setdefault('conflicts', [])
-                old_urls={canonical_url(s.get('url','')) for s in existing.get('sources',[])}
-                same_source_refresh=job.get('ingest_mode')=='source_refresh' and any(canonical_url(s.get('url','')) in old_urls for s in job.get('sources',[]))
+                old_urls={source_key(s) for s in existing.get('sources',[])}
+                same_source_refresh=job.get('ingest_mode')=='source_refresh' and any(source_key(s) in old_urls for s in job.get('sources',[]))
                 for field in ('company', 'title', 'city', 'salary_raw', 'experience', 'education', 'responsibilities', 'requirements', 'published_at'):
                     if not known(existing.get(field)) and known(job.get(field)):
                         existing[field] = job[field]
@@ -196,7 +208,7 @@ class Store:
                 for field in ('sources', 'attachments'):
                     for entry in job[field]:
                         unique = 'url' if field == 'sources' else 'id'
-                        if not any(x.get(unique) == entry.get(unique) for x in existing[field]):
+                        if not any((source_key(x)==source_key(entry)) if field=='sources' else x.get(unique)==entry.get(unique) for x in existing[field]):
                             existing[field].append(entry)
                 for field in ('original_inputs', 'import_warnings'):
                     existing.setdefault(field, [])
@@ -219,7 +231,7 @@ class Store:
             for source in job['sources']:
                 url = canonical_url(source.get('url', ''))
                 if url:
-                    db.execute('INSERT OR IGNORE INTO sources VALUES (?,?)', (sample_prefix+url, job['id']))
+                    db.execute('INSERT OR IGNORE INTO sources VALUES (?,?)', (sample_prefix+source_key(source), job['id']))
         return job, new
 
     def tasks_for(self, job_id):

@@ -1,0 +1,24 @@
+[
+  {
+    "fixture": "tokenfab.html",
+    "source_url": "https://www.tokenfab.cn/join.html",
+    "observed_at_utc": "2026-10-01T06:22:52Z",
+    "http_status": 200,
+    "capture_method": "Read-only Python urllib HTTPS request to the official public page; no login, browser rendering, or private API.",
+    "original_response_bytes": 177352,
+    "original_response_sha256": "0a199d5c3cab895253f61bb1c7dac3a7e7272ad4e56bcecb95975e533e7714d6",
+    "fixture_scope": "Three unmodified job-card DOM subtrees, serialized by BeautifulSoup; document wrapper only added for the fixture. Newlines normalized to LF and trailing whitespace removed for repository hygiene; visible text and selectors unchanged.",
+    "verification_limit": "Application safe_fetch was separately attempted but failed at DNS in this execution environment. These are parser fixtures, not evidence of a successful robots-checked runtime integration."
+  },
+  {
+    "fixture": "extremevision.html",
+    "source_url": "https://www.extremevision.com.cn/join-us/",
+    "observed_at_utc": "2026-10-01T06:22:52Z",
+    "http_status": 200,
+    "capture_method": "Read-only Python urllib HTTPS request to the official public page; no login, browser rendering, or private API.",
+    "original_response_bytes": 126825,
+    "original_response_sha256": "b287186c916b069eb7d9d2f855e08061cc8405f4161feb09221f5fd4a2407da0",
+    "fixture_scope": "Complete recruitment DOM subtree, serialized by BeautifulSoup; document wrapper only added for the fixture. Newlines normalized to LF and trailing whitespace removed for repository hygiene; visible text and selectors unchanged.",
+    "verification_limit": "Application safe_fetch was separately attempted but failed at DNS in this execution environment. These are parser fixtures, not evidence of a successful robots-checked runtime integration."
+  }
+]
